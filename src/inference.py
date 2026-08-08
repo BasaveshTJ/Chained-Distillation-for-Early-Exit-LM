@@ -2,59 +2,53 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-prompt = "The capital of France is"
+prompt = "The capital of France is "
 
 #######################################
 # gpt2 117M
 #######################################
-print("########################################### GPT-2 ###########################################")
-model_name = "gpt2"
+# print("########################################### GPT-2 ###########################################")
+# model_name = "gpt2"
 
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16 if device=="cuda" else torch.float32).to(device)
-model.eval()
+# tokenizer = AutoTokenizer.from_pretrained(model_name)
+# model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
+# model.eval()
 
-inputs = tokenizer(prompt, return_tensors="pt").to(device)
+# inputs = tokenizer(prompt, return_tensors="pt").to(device)
 
-with torch.no_grad():
-    outputs = model.generate(
-        **inputs, max_new_tokens=100, temperature=0.8, top_p=0.95,
-        do_sample=True, pad_token_id=tokenizer.eos_token_id,
-    )
-print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+# with torch.no_grad():
+#     outputs = model.generate(**inputs, max_new_tokens=100, temperature=0.8, top_p=0.95, do_sample=True, pad_token_id=tokenizer.eos_token_id)
+# print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 
-print("############################################################################")
+# print("############################################################################")
 
-outputs = model.generate(**inputs, max_new_tokens=100, do_sample=False, pad_token_id=tokenizer.eos_token_id)
-print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+# outputs = model.generate(**inputs, max_new_tokens=100, do_sample=False, pad_token_id=tokenizer.eos_token_id)
+# print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 
 
-###########################################
-# OPT-125M (~125M parameters)
-###########################################
-print("########################################### OPT-125M ###########################################")
-model_name = "facebook/opt-125m"
+# ###########################################
+# # OPT-125M (~125M parameters)
+# ###########################################
+# print("########################################### OPT-125M ###########################################")
+# model_name = "facebook/opt-125m"
 
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16 if device=="cuda" else torch.float32).to(device)
-model.eval()
+# tokenizer = AutoTokenizer.from_pretrained(model_name)
+# model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
+# model.eval()
 
-inputs = tokenizer(prompt, return_tensors="pt").to(device)
+# inputs = tokenizer(prompt, return_tensors="pt").to(device)
 
-# ---------- Sampling generation ----------
-with torch.no_grad():
-    outputs = model.generate(
-        **inputs, max_new_tokens=100, temperature=0.8, top_p=0.95,
-        do_sample=True, pad_token_id=tokenizer.eos_token_id,
-    )
-print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+# # ---------- Sampling generation ----------
+# with torch.no_grad():
+#     outputs = model.generate(**inputs, max_new_tokens=100, temperature=0.8, top_p=0.95, do_sample=True, pad_token_id=tokenizer.eos_token_id)
+# print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 
-print("############################################################################")
+# print("############################################################################")
 
-# ---------- Greedy generation ----------
-with torch.no_grad():
-    outputs = model.generate(**inputs, max_new_tokens=100, do_sample=False, pad_token_id=tokenizer.eos_token_id)
-print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+# # ---------- Greedy generation ----------
+# with torch.no_grad():
+#     outputs = model.generate(**inputs, max_new_tokens=100, do_sample=False, pad_token_id=tokenizer.eos_token_id)
+# print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 
 
 ###########################################
@@ -63,24 +57,40 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 print("########################################### SmolLM2 135M ###########################################")
 # model_name = "HuggingFaceTB/SmolLM2-135M"
 model_name = "HuggingFaceTB/SmolLM2-135M-Instruct"
-
+model_path = "./smollm2-135m-finetuned"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16 if device=="cuda" else torch.float32).to(device)
-model.eval()
+model_without_EE = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
+model_without_EE.eval()
+from SmolLM2EarlyExitForCausalLM import SmolLM2EarlyExitForCausalLM
+model_with_EE = SmolLM2EarlyExitForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
+model_with_EE.eval()
+
 
 inputs = tokenizer(prompt, return_tensors="pt").to(device)
 
+print("\n################################ without EE ##################################")
 # ---------- Sampling generation ----------
 with torch.no_grad():
-    outputs = model.generate(
-        **inputs, max_new_tokens=100, temperature=0.8, top_p=0.95,
-        do_sample=True, pad_token_id=tokenizer.eos_token_id,
-    )
+    outputs = model_without_EE.generate(**inputs, max_new_tokens=100, temperature=0.8, top_p=0.95, do_sample=True, pad_token_id=tokenizer.eos_token_id)
 print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 
 print("############################################################################")
 
 # ---------- Greedy generation ----------
 with torch.no_grad():
-    outputs = model.generate(**inputs, max_new_tokens=100, do_sample=False, pad_token_id=tokenizer.eos_token_id)
+    outputs = model_without_EE.generate(**inputs, max_new_tokens=100, do_sample=False, pad_token_id=tokenizer.eos_token_id)
+print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+
+
+print("\n################################ with EE ##################################")
+# ---------- Sampling generation ----------
+with torch.no_grad():
+    outputs = model_with_EE.generate(**inputs, max_new_tokens=100, temperature=0.8, top_p=0.95, do_sample=True, pad_token_id=tokenizer.eos_token_id)
+print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+
+print("############################################################################")
+
+# ---------- Greedy generation ----------
+with torch.no_grad():
+    outputs = model_with_EE.generate(**inputs, max_new_tokens=100, do_sample=False, pad_token_id=tokenizer.eos_token_id)
 print(tokenizer.decode(outputs[0], skip_special_tokens=True))

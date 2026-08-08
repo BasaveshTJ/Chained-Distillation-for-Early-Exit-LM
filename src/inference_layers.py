@@ -1,9 +1,9 @@
 import torch
 import torch.nn.functional as F
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-prompt = "The capital of France is "
+prompt = "berlin and paris are "
 
 # ======================================================
 # GPT-2
@@ -36,7 +36,7 @@ for layer_idx, hidden in enumerate(hidden_states[1:-1]):
     print(f"\nLayer {layer_idx + 1}")
     for rank in range(5):
         token = tokenizer.decode([top_ids[0, rank].item()])
-        print(f"{rank+1}. {repr(token):15} {top_probs[0, rank].item():.6f}")
+        print(f"{rank + 1}. {repr(token):15} {top_probs[0, rank].item():.6f}")
 
 # last layer
 h = hidden_states[-1][:, -1, :]
@@ -77,13 +77,13 @@ for layer_idx, hidden in enumerate(hidden_states[1:-1]):
     print(f"\nLayer {layer_idx + 1}")
     for rank in range(5):
         token = tokenizer.decode([top_ids[0, rank].item()])
-        print(f"{rank+1}. {repr(token):15} {top_probs[0, rank].item():.6f}")
+        print(f"{rank + 1}. {repr(token):15} {top_probs[0, rank].item():.6f}")
 
 # Last layer prediction
 h = model.model.decoder.final_layer_norm(hidden_states[-1][:, -1, :])
 probs = torch.softmax(model.lm_head(h), dim=-1)
 top_probs, top_ids = torch.topk(probs, k=5)
-print(f"\nLayer {len(hidden_states)-1}")
+print(f"\nLayer {len(hidden_states) - 1}")
 for rank in range(5):
     token = tokenizer.decode([top_ids[0, rank].item()])
     print(f"{rank+1}. {repr(token):15} {top_probs[0, rank].item():.6f}")
@@ -93,46 +93,62 @@ for rank in range(5):
 # SmolLM2 135M
 # ======================================================
 print("\n########################################### SmolLM2 135M ###########################################")
-model_name = "HuggingFaceTB/SmolLM2-135M"
-model_name = "HuggingFaceTB/SmolLM2-135M-Instruct"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name, output_hidden_states=True).to(device)
-model.eval()
-messages_think = [
-    {"role": "user", "content": prompt}
-]
-text = tokenizer.apply_chat_template(
-    messages_think,
-    tokenize=False,
-    add_generation_prompt=True,
-)
-inputs = tokenizer(prompt, return_tensors="pt").to(device)
+base_model_name = "HuggingFaceTB/SmolLM2-135M-Instruct"
+finetuned_model_path = "./smollm2-135m-finetuned/checkpoint-396"
+top_k = 5
 
-with torch.no_grad():
-    outputs = model(**inputs, output_hidden_states=True, return_dict=True)
+tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+model_without_EE = AutoModelForCausalLM.from_pretrained(base_model_name, output_hidden_states=True).to(device)
+from SmolLM2EarlyExitForCausalLM import SmolLM2EarlyExitForCausalLM
+model_with_EE = SmolLM2EarlyExitForCausalLM.from_pretrained(finetuned_model_path, output_hidden_states=True).to(device)
 
-hidden_states = outputs.hidden_states
+model_without_EE.eval()
+model_with_EE.eval()
 
-print("Number of hidden states:", len(hidden_states))
 
-# Logit lens on Shallow layers
-print("========== Shallow Layers predictions ==========")
+def _topk_rows(logits, tokenizer, k=5):
+    probs = torch.softmax(logits, dim=-1)
+    top_probs, top_ids = torch.topk(probs, k=k)
+    rows = []
+    for rank in range(k):
+        token = tokenizer.decode([top_ids[rank].item()]).replace("\n", "\\n")
+        rows.append(f"{rank + 1}:{repr(token)} {top_probs[rank].item():.4f}")
+    return rows
 
-for layer_idx, hidden in enumerate(hidden_states[1:-1]):
-    h = model.model.norm(hidden[:, -1, :])
-    probs = torch.softmax(model.lm_head(h), dim=-1)
-    top_probs, top_ids = torch.topk(probs, k=5)
-    print(f"\nLayer {layer_idx}")
 
-    for rank in range(5):
-        token = tokenizer.decode([top_ids[0, rank].item()])
-        print(f"{rank + 1}. {repr(token):15} {top_probs[0, rank].item():.6f}")
+def _layer_logits_last_token(model, inputs):
+    with torch.no_grad():
+        outputs = model(**inputs, output_hidden_states=True, return_dict=True)
 
-# Last layer prediction
-h = model.model.norm(hidden_states[-1][:, -1, :])
-probs = torch.softmax(model.lm_head(h), dim=-1)
-top_probs, top_ids = torch.topk(probs, k=5)
-print(f"\nLayer {len(hidden_states)-1}")
-for rank in range(5):
-    token = tokenizer.decode([top_ids[0, rank].item()])
-    print(f"{rank+1}. {repr(token):15} {top_probs[0, rank].item():.6f}")
+    hidden_states = outputs.hidden_states
+    num_layers = model.config.num_hidden_layers
+    layer_logits = []
+
+    for layer_idx in range(1, num_layers + 1):
+        h = hidden_states[layer_idx][:, -1, :]
+        if layer_idx < num_layers:
+            h = model.model.norm(h)
+        layer_logits.append(model.lm_head(h).squeeze(0))
+
+    return layer_logits
+
+
+chat_text = tokenizer.apply_chat_template([{"role": "user", "content": prompt}], tokenize=False, add_generation_prompt=True)
+inputs = tokenizer(chat_text, return_tensors="pt").to(device)
+
+base_logits_by_layer = _layer_logits_last_token(model_without_EE, inputs)
+ft_logits_by_layer = _layer_logits_last_token(model_with_EE, inputs)
+
+print("Number of layers:", len(base_logits_by_layer))
+print("========== Side-by-side per-layer logits (last token) ==========")
+print("Columns: Base model top-k || Fine-tuned early-exit model top-k")
+
+for layer_idx, (base_logits, ft_logits) in enumerate(zip(base_logits_by_layer, ft_logits_by_layer), start=1):
+    cos_sim = F.cosine_similarity(base_logits.unsqueeze(0), ft_logits.unsqueeze(0)).item()
+    base_rows = _topk_rows(base_logits, tokenizer, top_k)
+    ft_rows = _topk_rows(ft_logits, tokenizer, top_k)
+
+    print(f"\nLayer {layer_idx:02d} | cosine={cos_sim:.4f}")
+    print(f"{'Base:':<32}FT:")
+    for base_row, ft_row in zip(base_rows, ft_rows):
+        print(f"{base_row:<32}{ft_row}")
