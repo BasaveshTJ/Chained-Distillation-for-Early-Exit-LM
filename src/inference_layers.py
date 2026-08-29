@@ -3,7 +3,25 @@ import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-prompt = "berlin and paris are "
+# prompt = "berlin and paris are "
+prompt = [
+   {
+    "content": "Hi there",
+    "role": "user"
+  },
+  {
+    "content": "Hello! How can I help you today?",
+    "role": "assistant"
+  },
+  {
+    "content": "I'm looking for a beach resort for my next vacation. Can you recommend some popular ones?",
+    "role": "user"
+  },
+   {
+    "content": "Some",
+    "role": "assistant"
+  }
+   ]
 
 # ======================================================
 # GPT-2
@@ -94,7 +112,7 @@ for rank in range(5):
 # ======================================================
 print("\n########################################### SmolLM2 135M ###########################################")
 base_model_name = "HuggingFaceTB/SmolLM2-135M-Instruct"
-finetuned_model_path = "./smollm2-135m-finetuned/checkpoint-396"
+finetuned_model_path = "./smollm2-135m-finetuned/checkpoint-670"
 top_k = 5
 
 tokenizer = AutoTokenizer.from_pretrained(base_model_name)
@@ -133,8 +151,7 @@ def _layer_logits_last_token(model, inputs):
     return layer_logits
 
 
-chat_text = tokenizer.apply_chat_template([{"role": "user", "content": prompt}], tokenize=False, add_generation_prompt=True)
-inputs = tokenizer(chat_text, return_tensors="pt").to(device)
+inputs = tokenizer.apply_chat_template(prompt, tokenize=True, add_generation_prompt=True, return_tensors="pt").to(device)
 
 base_logits_by_layer = _layer_logits_last_token(model_without_EE, inputs)
 ft_logits_by_layer = _layer_logits_last_token(model_with_EE, inputs)

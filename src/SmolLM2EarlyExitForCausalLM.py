@@ -148,9 +148,9 @@ class SmolLM2EarlyExitForCausalLM(LlamaForCausalLM):
         **kwargs,
     ):
         # ---------------------------------------------------------
-        # We need hidden states at layers 10 and 20.
+        # Hidden states at layers 10 and 20 are required.
         #
-        # We do NOT expose all hidden states by default because
+        # All hidden states are NOT exposed by default because
         # that wastes memory.
         # ---------------------------------------------------------
 

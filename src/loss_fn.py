@@ -123,7 +123,7 @@ def hierarchical_early_exit_kd_loss(
         #
         # p_teacher(y)
         #
-        # We only need the probability of the ground-truth
+        # Only the probability of the ground-truth is needed
         # token, so there is no need to construct the complete
         # probability distribution.
         # -----------------------------------------------------

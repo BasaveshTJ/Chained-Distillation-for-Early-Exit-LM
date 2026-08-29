@@ -2,7 +2,20 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-prompt = "The capital of France is "
+# prompt = "The capital of France is "
+prompt = [
+   {
+    "content": "Hi there",
+    "role": "user"
+  },
+  {
+    "content": "Hello! How can I help you today?",
+    "role": "assistant"
+  },
+  {
+    "content": "I'm looking for a beach resort for my next vacation. Can you recommend some popular ones?",
+    "role": "user"
+  } ]
 
 #######################################
 # gpt2 117M
@@ -57,7 +70,7 @@ prompt = "The capital of France is "
 print("########################################### SmolLM2 135M ###########################################")
 # model_name = "HuggingFaceTB/SmolLM2-135M"
 model_name = "HuggingFaceTB/SmolLM2-135M-Instruct"
-model_path = "./smollm2-135m-finetuned"
+model_path = "./smollm2-135m-finetuned/checkpoint-670"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model_without_EE = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
 model_without_EE.eval()
@@ -66,7 +79,8 @@ model_with_EE = SmolLM2EarlyExitForCausalLM.from_pretrained(model_path, torch_dt
 model_with_EE.eval()
 
 
-inputs = tokenizer(prompt, return_tensors="pt").to(device)
+# inputs = tokenizer(prompt, return_tensors="pt").to(device)
+inputs = tokenizer.apply_chat_template(prompt, tokenize=True, add_generation_prompt=True, return_tensors="pt").to(device)
 
 print("\n################################ without EE ##################################")
 # ---------- Sampling generation ----------
