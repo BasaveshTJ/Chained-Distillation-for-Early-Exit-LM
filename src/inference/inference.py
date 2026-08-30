@@ -74,7 +74,7 @@ model_path = "./smollm2-135m-finetuned/checkpoint-670"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model_without_EE = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
 model_without_EE.eval()
-from SmolLM2EarlyExitForCausalLM import SmolLM2EarlyExitForCausalLM
+from model.SmolLM2EarlyExitForCausalLM import SmolLM2EarlyExitForCausalLM
 model_with_EE = SmolLM2EarlyExitForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
 model_with_EE.eval()
 

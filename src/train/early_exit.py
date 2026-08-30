@@ -5,8 +5,8 @@ from datasets import DatasetDict, load_dataset
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
 
-from loss_fn import hierarchical_early_exit_kd_loss
-from SmolLM2EarlyExitForCausalLM import SmolLM2EarlyExitForCausalLM
+from model.loss_fn import hierarchical_early_exit_kd_loss
+from model.SmolLM2EarlyExitForCausalLM import SmolLM2EarlyExitForCausalLM
 
 
 # ============================================================

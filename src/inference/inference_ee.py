@@ -40,7 +40,7 @@ finetuned_model_path = "./smollm2-135m-finetuned/checkpoint-670"
 
 tokenizer = AutoTokenizer.from_pretrained(base_model_name)
 model_without_EE = AutoModelForCausalLM.from_pretrained(base_model_name, output_hidden_states=True).to(device)
-from SmolLM2EarlyExitForCausalLM import SmolLM2EarlyExitForCausalLM
+from model.SmolLM2EarlyExitForCausalLM import SmolLM2EarlyExitForCausalLM
 model_with_EE = SmolLM2EarlyExitForCausalLM.from_pretrained(finetuned_model_path, output_hidden_states=True).to(device)
 
 model_without_EE.eval()
