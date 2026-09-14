@@ -1,12 +1,14 @@
+import math
+
 import torch
 
-from datasets import DatasetDict, load_dataset
+from datasets import DatasetDict, load_dataset, load_dataset_builder
 
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
 
-from loss_fn import hierarchical_early_exit_kd_loss
-from SmolLM2EarlyExitForCausalLM import SmolLM2EarlyExitForCausalLM
+from model.loss_fn import hierarchical_early_exit_kd_loss
+from model.SmolLM2EarlyExitForCausalLM import SmolLM2EarlyExitForCausalLM
 
 
 # ============================================================
@@ -16,8 +18,8 @@ from SmolLM2EarlyExitForCausalLM import SmolLM2EarlyExitForCausalLM
 MODEL_ID = "HuggingFaceTB/SmolLM2-135M-Instruct"
 DATASET_ID = "HuggingFaceTB/smol-smoltalk"
 OUTPUT_DIR = "./smollm2-135m-finetuned"
-SUBSET = "everyday-conversations"
-
+SUBSET = "all"
+NUM_CHECKPOINTS = 5
 # ============================================================
 # Early-exit configuration
 # ============================================================
@@ -41,8 +43,6 @@ LAMBDA_CE = 1.0
 #
 # Smaller values use less temporary GPU memory.
 #
-VOCAB_CHUNK_SIZE = 1024
-
 # ============================================================
 # Training configuration
 # ============================================================
@@ -65,6 +65,8 @@ VOCAB_CHUNK_SIZE = 1024
 TRAIN_BATCH_SIZE = 8
 EVAL_BATCH_SIZE = 8
 GRADIENT_ACCUMULATION_STEPS = 4
+MAX_LENGTH = 1024
+VOCAB_CHUNK_SIZE = 1024
 
 # ============================================================
 # Tokenizer
@@ -99,22 +101,6 @@ model.verify_architecture()
 # Dataset
 # ============================================================
 
-print(f"📦 Loading dataset split: {DATASET_ID}")
-train_dataset = load_dataset(DATASET_ID, split="train")
-test_dataset = load_dataset(DATASET_ID, split="test")
-
-# ============================================================
-# Select SmolLM rewrite subset
-# ============================================================
-
-train_dataset = train_dataset.filter(lambda example: example["source"] == SUBSET)
-test_dataset = test_dataset.filter(lambda example: example["source"] == SUBSET)
-
-print(f"Training examples: {len(train_dataset)}")
-print(f"Test examples: {len(test_dataset)}")
-
-dataset = DatasetDict({"train": train_dataset, "test": test_dataset})
-
 # ============================================================
 # Chat formatting
 # ============================================================
@@ -123,32 +109,56 @@ def format_prompts(batch):
     texts = []
 
     for messages in batch["messages"]:
-        text = tokenizer.apply_chat_template(messages, tokenize=False)
+        text = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=False,
+        )
         texts.append(text)
 
     return {"text": texts}
 
-dataset = dataset.map(format_prompts, batched=True)
+print(f"📦 Loading dataset split: {DATASET_ID}")
+if SUBSET == "all":
+    train_examples = load_dataset_builder(DATASET_ID).info.splits["train"].num_examples
+    train_dataset = load_dataset(DATASET_ID, split="train", streaming=True)
+    train_dataset = train_dataset.map(format_prompts, batched=True)
 
-# ============================================================
-# Train / validation split
-# ============================================================
+    # Keep evaluation finite while streaming the complete training split.
+    eval_dataset = load_dataset(DATASET_ID, split="test")
+    eval_dataset = eval_dataset.map(format_prompts, batched=True)
+    max_steps = math.ceil(
+        train_examples / (TRAIN_BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS)
+    )
+    train_dataset_for_trainer = train_dataset
+    eval_dataset_for_trainer = eval_dataset
+else:
+    train_dataset = load_dataset(DATASET_ID, split="train")
+    test_dataset = load_dataset(DATASET_ID, split="test")
+    train_dataset = train_dataset.filter(lambda example: example["source"] == SUBSET)
+    test_dataset = test_dataset.filter(lambda example: example["source"] == SUBSET)
 
-train_val = dataset["train"].train_test_split(
-    test_size=0.05,
-    seed=42,
-)
+    dataset = DatasetDict({"train": train_dataset, "test": test_dataset})
+    dataset = dataset.map(format_prompts, batched=True)
 
-dataset_dict = DatasetDict({
-    "train": train_val["train"],
-    "validation": train_val["test"],
-    "test": dataset["test"],
-})
+    train_val = dataset["train"].train_test_split(test_size=0.05, seed=42)
+    dataset_dict = DatasetDict({
+        "train": train_val["train"],
+        "validation": train_val["test"],
+        "test": dataset["test"],
+    })
+    train_dataset_for_trainer = dataset_dict["train"]
+    eval_dataset_for_trainer = dataset_dict["validation"]
+    max_steps = -1
+
+print(f"Training examples: {train_examples if SUBSET == 'all' else len(dataset_dict['train'])}")
+print(f"Validation examples: {len(eval_dataset_for_trainer)}")
 
 print("\nDataset:")
-print(f"Train: {len(dataset_dict['train'])}")
-print(f"Validation: {len(dataset_dict['validation'])}")
-print(f"Test: {len(dataset_dict['test'])}")
+print(f"Train: {train_examples if SUBSET == 'all' else len(dataset_dict['train'])}")
+print(f"Validation: {len(eval_dataset_for_trainer)}")
+if SUBSET != "all":
+    print(f"Test: {len(dataset_dict['test'])}")
 
 
 # ============================================================
@@ -172,27 +182,29 @@ def compute_loss_func(
 # ============================================================
 # Training arguments
 # ============================================================
-
+save_steps = max(1, math.ceil(max_steps / NUM_CHECKPOINTS)) if max_steps > 0 else None
 training_args = SFTConfig(
     output_dir=OUTPUT_DIR,
     per_device_train_batch_size=TRAIN_BATCH_SIZE,
     per_device_eval_batch_size=EVAL_BATCH_SIZE,
     gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
-    learning_rate=2e-5,
+    learning_rate=2e-4,
     lr_scheduler_type="cosine",
     warmup_steps=100,
     optim="adamw_torch_fused",
     logging_steps=500,
     eval_strategy="epoch",
-    save_strategy="epoch",
-    num_train_epochs=3,
+    save_strategy="steps",
+    save_steps=save_steps,
+    num_train_epochs=1,
+    max_steps=max_steps,
     bf16=False,
     fp16=True,
     gradient_checkpointing=True,
     gradient_checkpointing_kwargs={ "use_reentrant": False },
     report_to="none",
     seed=42,
-    max_length=2048,
+    max_length=MAX_LENGTH,
     dataset_text_field="text",
     ddp_find_unused_parameters=False,
 )
@@ -217,8 +229,8 @@ print("=" * 70)
 trainer = SFTTrainer(
     model=model,
     args=training_args,
-    train_dataset=dataset_dict["train"],
-    eval_dataset=dataset_dict["validation"],
+    train_dataset=train_dataset_for_trainer,
+    eval_dataset=eval_dataset_for_trainer,
     processing_class=tokenizer,
     compute_loss_func=compute_loss_func,
 )
